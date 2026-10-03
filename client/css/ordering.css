@@ -736,6 +736,10 @@ input:focus-visible {
     text-align: center
 }
 
+.empty-cart[hidden] {
+    display: none
+}
+
 .empty-cart-icon {
     font-size: 2.4rem
 }

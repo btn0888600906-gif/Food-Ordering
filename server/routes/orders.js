@@ -4,6 +4,7 @@ const { readData, writeData, nextId } = require("../utils/db");
 const { requireAdmin } = require("../middleware/adminAuth");
 
 const FILE = "orders.json";
+const MENU_FILE = "menu.json";
 const REVENUE_FILE = "revenue.json";
 const VALID_STATUSES = ["pending", "preparing", "delivering", "completed", "cancelled"];
 const VALID_PAYMENT_STATUSES = ["unpaid", "paid"];
@@ -17,6 +18,35 @@ function todayKey() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function buildOrderItems(clientItems) {
+  const menuById = new Map(readData(MENU_FILE).map((item) => [Number(item.id), item]));
+
+  return clientItems.map((clientItem) => {
+    const id = Number(clientItem.id);
+    const quantity = Number(clientItem.quantity);
+    const menuItem = menuById.get(id);
+
+    if (!menuItem) {
+      throw new Error("Dish not found in the menu");
+    }
+
+    if (menuItem.available === false) {
+      throw new Error(`${menuItem.name} is not available`);
+    }
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new Error("Invalid item quantity");
+    }
+
+    return {
+      id: menuItem.id,
+      name: menuItem.name,
+      price: Number(menuItem.price),
+      quantity,
+    };
+  });
 }
 
 // GET /api/orders - (admin) view all orders
@@ -55,18 +85,25 @@ router.get("/:id", (req, res) => {
 router.post("/", (req, res) => {
   const { customerName, tableNumber, items } = req.body;
 
-  if (!customerName || !items || items.length === 0) {
+  if (!customerName || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Missing customer name or the cart is empty" });
   }
 
-  const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  let orderItems;
+  try {
+    orderItems = buildOrderItems(items);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const total = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   const orders = readData(FILE);
   const newOrder = {
     id: nextId(orders),
     customerName,
     tableNumber: tableNumber || null,
-    items,
+    items: orderItems,
     total,
     status: "pending",
     paymentStatus: "unpaid",
